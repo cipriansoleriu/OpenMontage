@@ -106,8 +106,17 @@ def _validate_artifacts_for_stage(
     status: str,
     artifacts: dict[str, Any],
 ) -> None:
-    required_artifact = CANONICAL_STAGE_ARTIFACTS[stage]
-    if status in {"completed", "awaiting_human"} and required_artifact not in artifacts:
+    # Custom pipeline stages (e.g. character_bible, identity_train) have no
+    # canonical artifact — a raw KeyError here made their checkpoints
+    # unwritable and their gates unenforceable. Only enforce presence for
+    # stages that declare one; per-artifact schema validation below is
+    # unaffected. (Also fixes character-animation's custom stages.)
+    required_artifact = CANONICAL_STAGE_ARTIFACTS.get(stage)
+    if (
+        required_artifact
+        and status in {"completed", "awaiting_human"}
+        and required_artifact not in artifacts
+    ):
         raise CheckpointValidationError(
             f"Stage {stage!r} with status {status!r} must include "
             f"canonical artifact {required_artifact!r}"

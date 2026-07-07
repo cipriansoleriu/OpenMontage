@@ -1,0 +1,236 @@
+name: consistent-character-vsl
+version: "0.1.0"
+description: >
+  Subscription-free consistent-character VSL/UGC pipeline. One registered character
+  (lib/character_registry.py) anchors every scene: identity-locked keyframes are
+  generated from the character's reference images (Nano Banana Pro via Kie —
+  live-verified 0.95+ identity similarity), animated per scene-type (Seedance for
+  talking beats, Kling for action), and gated by the identity_drift judge before
+  and after animation. LoRA training is an OPT-IN optimization for heavily-reused
+  characters, never a default step. Compose defaults are decided at proposal with
+  both runtimes presented; HyperFrames is the recommendation (Apache-2.0,
+  product-safe) but never a silent default.
+category: generated
+stability: beta
+default_checkpoint_policy: guided
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/consistent-character-vsl/executive-producer
+  budget_default_usd: 10.00
+  max_revisions_per_stage: 3
+  max_send_backs: 2
+  max_wall_time_minutes: 45
+
+required_skills:
+  - pipelines/consistent-character-vsl/executive-producer
+  - pipelines/consistent-character-vsl/research-director
+  - pipelines/consistent-character-vsl/proposal-director
+  - pipelines/consistent-character-vsl/script-director
+  - pipelines/consistent-character-vsl/scene-director
+  - pipelines/consistent-character-vsl/character-bible-director
+  - pipelines/consistent-character-vsl/identity-train-director
+  - pipelines/consistent-character-vsl/asset-director
+  - pipelines/consistent-character-vsl/edit-director
+  - pipelines/consistent-character-vsl/compose-director
+  - meta/reviewer
+  - meta/checkpoint-protocol
+
+stages:
+  - name: research
+    skill: pipelines/consistent-character-vsl/research-director
+    produces:
+      - research_brief
+    tools_available:
+      - web_search
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Audience, offer, and core pain are explicit and sourced from the brief
+      - Claims that will appear on screen are verifiable or clearly framed as opinion
+      - Persuasion angle fits VSL structure (hook, problem, agitate, solution, proof, CTA)
+    success_criteria:
+      - Schema-valid research_brief artifact
+      - Target audience, platform, and duration band stated
+
+  - name: proposal
+    skill: pipelines/consistent-character-vsl/proposal-director
+    required_artifacts_in:
+      - research_brief
+    produces:
+      - proposal_packet
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Both composition runtimes presented with tradeoffs; render_runtime_selection logged
+      - renderer_family locked in production_plan (presenter for character-led VSLs)
+      - Character plan named (new or reused registry character) with reference strategy
+      - Identity approach recorded as a provider_selection decision with subject "Identity approach (references vs LoRA)" (references default, LoRA opt-in)
+      - Model mix per scene type is explicit (Seedance talking, Kling action)
+      - Budget estimate itemized per scene and within budget_default_usd
+      - Music plan is resolved
+    success_criteria:
+      - Schema-valid proposal_packet with production_plan.render_runtime and renderer_family
+      - decision_log has render_runtime_selection with BOTH runtimes in options_considered
+      - decision_log has the identity approach decision (category provider_selection)
+      - At least 3 concept options per the proposal_packet schema
+      - Cost estimate itemized per scene
+
+  - name: script
+    skill: pipelines/consistent-character-vsl/script-director
+    required_artifacts_in:
+      - proposal_packet
+    produces:
+      - script
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - VSL beats present (hook, problem, agitation, solution, proof, CTA)
+      - Narration is spoken-voice natural and timed to the duration band
+      - Every scene beat is achievable by the planned model mix
+    success_criteria:
+      - Schema-valid script artifact
+      - Section timings sum to the approved duration
+
+  - name: scene_plan
+    skill: pipelines/consistent-character-vsl/scene-director
+    required_artifacts_in:
+      - script
+    produces:
+      - scene_plan
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Each scene typed with the schema enum - talking_head for talking beats, character_scene for action (drives the model mix)
+      - Character presence and wardrobe/setting continuity noted per scene
+      - 4-6 scenes for the standard VSL; per-scene span (end_seconds - start_seconds) within model limits (4-15s)
+    success_criteria:
+      - Schema-valid scene_plan artifact
+      - Every scene has a schema-legal type, start/end seconds, and a keyframe brief in description
+
+  - name: character_bible
+    skill: pipelines/consistent-character-vsl/character-bible-director
+    required_artifacts_in:
+      - scene_plan
+    produces:
+      - character_bible
+    tools_available:
+      - nano_banana_pro
+      - keyframe_lock
+      - identity_drift
+    required_tools:
+      - keyframe_lock
+      - identity_drift
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Character exists in the registry with 4-8 approved reference images
+      - References pass a self-consistency identity_drift check
+      - Description captures durable identity markers (face, hair, marks, build)
+    success_criteria:
+      - character_bible artifact names the registry character_id
+      - Reference set approved by the user at the gate
+
+  - name: identity_train
+    skill: pipelines/consistent-character-vsl/identity-train-director
+    required_artifacts_in:
+      - character_bible
+    produces:
+      - identity_record
+    tools_available:
+      - lora_train
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - Default is SKIP (references-only) per the verified 0.95+ NBP identity finding
+      - LoRA trained only on explicit user opt-in recorded in decision_log
+      - identity_record states the active identity mode for the assets stage
+    success_criteria:
+      - identity_record artifact present with mode references or lora
+      - No training spend without an identity_approach opt-in decision
+
+  - name: assets
+    skill: pipelines/consistent-character-vsl/asset-director
+    required_artifacts_in:
+      - scene_plan
+      - character_bible
+      - identity_record
+    produces:
+      - asset_manifest
+    tools_available:
+      - keyframe_lock
+      - identity_drift
+      - frame_sampler
+      - nano_banana_pro
+      - video_selector
+      - seedance_kie
+      - seedance_video
+      - seedance_openrouter
+      - kling_video
+      - tts_selector
+      - elevenlabs_tts
+      - music_library
+      - audio_mixer
+    required_tools:
+      - keyframe_lock
+      - identity_drift
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - Per-scene loop honored - keyframe passes identity gate BEFORE animation spends money
+      - Rendered clips frame-sampled and identity_drift-checked cross-scene (video_paths)
+      - Model mix honored (Seedance talking, Kling action) or deviation logged
+      - Provenance in schema-legal fields (source_tool, model, provider, cost_usd, quality_score, generation_summary)
+      - Spend tracked per scene against the approved budget
+    success_criteria:
+      - Schema-valid asset_manifest with scene linkage
+      - All scenes pass the identity gate at threshold 0.75 or user approved exceptions
+      - Total spend within approved budget
+
+  - name: edit
+    skill: pipelines/consistent-character-vsl/edit-director
+    required_artifacts_in:
+      - asset_manifest
+    produces:
+      - edit_decisions
+    tools_available:
+      - silence_cutter
+      - audio_mixer
+      - subtitle_gen
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - edit_decisions carries render_runtime unchanged from the proposal
+      - Narration, music, and subtitle decisions are concrete per scene
+      - Cut timings match asset durations
+    success_criteria:
+      - Schema-valid edit_decisions with render_runtime and renderer_family
+      - Every cut references an asset_manifest asset id
+
+  - name: compose
+    skill: pipelines/consistent-character-vsl/compose-director
+    required_artifacts_in:
+      - edit_decisions
+      - asset_manifest
+    produces:
+      - render_report
+      - final_review
+    tools_available:
+      - video_compose
+      - hyperframes_compose
+      - subtitle_gen
+    required_tools:
+      - video_compose
+    checkpoint_required: true
+    human_approval_default: false
+    review_focus:
+      - video_compose routed by edit_decisions.render_runtime - no silent runtime swap
+      - Final render passes a last identity_drift spot check on sampled frames
+      - render_report includes spend summary and verification notes
+    success_criteria:
+      - Schema-valid render_report with output path
+      - Runtime used matches the proposal-locked render_runtime

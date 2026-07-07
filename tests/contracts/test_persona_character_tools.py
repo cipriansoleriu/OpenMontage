@@ -577,3 +577,404 @@ class TestToolHardeningRegressions:
             {"character_id": "ana", "prompt": "x", "mode": "lora", "aspect_ratio": "21:9"}
         )
         assert result.success is False and "references mode" in result.error
+
+
+# ---- M4: identity_drift on rendered clips (frame_sampler wiring) ----
+
+class TestIdentityDriftVideoWiring:
+    @pytest.fixture
+    def judge(self, monkeypatch):
+        """Fake OpenRouter judge that scores frames by filename hint."""
+        import sys
+        import types
+
+        def install(scores_by_index):
+            fake_requests = types.ModuleType("requests")
+
+            class _Resp:
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return {
+                        "choices": [{"message": {"content": json.dumps({
+                            "candidates": [
+                                {"index": i + 1, "same_person": s >= 0.5,
+                                 "similarity": s, "differences": []}
+                                for i, s in enumerate(scores_by_index)
+                            ]})}}]
+                    }
+
+            fake_requests.post = lambda url, **kw: _Resp()
+            monkeypatch.setitem(sys.modules, "requests", fake_requests)
+
+        return install
+
+    @pytest.fixture
+    def sampled_video(self, tmp_path, monkeypatch):
+        """Fake FrameSampler producing 3 real frame files per video."""
+        from tools.analysis.frame_sampler import FrameSampler
+        from tools.base_tool import ToolResult
+
+        def fake_execute(self, inputs):
+            # mirror the REAL FrameSampler contract: 'count' input key and
+            # dict frame entries with 'path' (mock-drift here masked two bugs)
+            assert "count" in inputs and "frame_count" not in inputs
+            out = Path(inputs["output_dir"])
+            out.mkdir(parents=True, exist_ok=True)
+            frames = []
+            for i in range(inputs["count"]):
+                frame = out / f"frame_{i:04d}.jpg"
+                frame.write_bytes(b"jpg")
+                frames.append({"path": str(frame), "timestamp_seconds": float(i), "index": i})
+            return ToolResult(success=True, data={"frames": frames})
+
+        monkeypatch.setattr(FrameSampler, "execute", fake_execute)
+        video = tmp_path / "scene-1.mp4"
+        video.write_bytes(b"mp4")
+        return video
+
+    def test_video_judged_by_worst_frame(self, prime_vault, tmp_path, judge, sampled_video):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        judge([0.95, 0.6, 0.9])  # middle frame drifts
+        result = IdentityDrift().execute(
+            {
+                "reference_image_paths": [str(ref)],
+                "video_paths": [str(sampled_video)],
+                "threshold": 0.75,
+            }
+        )
+        assert result.success, result.error
+        video_summary = result.data["videos"][0]
+        assert video_summary["frames_judged"] == 3
+        assert video_summary["worst_similarity"] == pytest.approx(0.6)
+        assert video_summary["passed"] is False  # worst frame rules
+        assert result.data["passed"] is False
+        assert all("source_video" in r for r in result.data["results"])
+
+    def test_video_passes_when_all_frames_pass(self, prime_vault, tmp_path, judge, sampled_video):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        judge([0.95, 0.9, 0.92])
+        result = IdentityDrift().execute(
+            {
+                "reference_image_paths": [str(ref)],
+                "video_paths": [str(sampled_video)],
+            }
+        )
+        assert result.success and result.data["videos"][0]["passed"] is True
+
+    def test_sampler_failure_fails_cleanly(self, prime_vault, tmp_path, monkeypatch):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        from tools.analysis.frame_sampler import FrameSampler
+        from tools.base_tool import ToolResult
+
+        monkeypatch.setattr(
+            FrameSampler, "execute",
+            lambda self, inputs: ToolResult(success=False, error="ffmpeg missing"),
+        )
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"mp4")
+        result = IdentityDrift().execute(
+            {"reference_image_paths": [str(ref)], "video_paths": [str(video)]}
+        )
+        assert result.success is False
+        assert "Frame sampling failed" in result.error
+
+    def test_bad_video_inputs_never_raise(self, prime_vault, tmp_path):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        r = IdentityDrift().execute(
+            {"reference_image_paths": [str(ref)], "video_paths": [123]}
+        )
+        assert r.success is False and "path strings" in r.error
+        r = IdentityDrift().execute(
+            {"reference_image_paths": [str(ref)], "video_paths": ["/nope.mp4"]}
+        )
+        assert r.success is False and "not found" in r.error
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"mp4")
+        r = IdentityDrift().execute(
+            {"reference_image_paths": [str(ref)], "video_paths": [str(video)],
+             "frames_per_video": "many"}
+        )
+        assert r.success is False and "frames_per_video" in r.error
+        r = IdentityDrift().execute({"reference_image_paths": [str(ref)]})
+        assert r.success is False and "video_paths" in r.error
+
+
+# ---- M4: consistent-character-vsl manifest contract ----
+
+class TestConsistentCharacterVslManifest:
+    def test_manifest_loads_and_validates(self):
+        from lib.pipeline_loader import load_pipeline
+
+        manifest = load_pipeline("consistent-character-vsl")
+        stages = [s["name"] for s in manifest["stages"]]
+        assert stages == [
+            "research", "proposal", "script", "scene_plan", "character_bible",
+            "identity_train", "assets", "edit", "compose",
+        ]
+
+    def test_gates_match_design(self):
+        from lib.pipeline_loader import load_pipeline
+
+        manifest = load_pipeline("consistent-character-vsl")
+        gates = {s["name"]: s.get("human_approval_default", False) for s in manifest["stages"]}
+        assert gates["proposal"] and gates["script"] and gates["scene_plan"]
+        assert gates["character_bible"] and gates["assets"]
+        # LoRA opt-in stage auto-proceeds (default is skip); edit/compose auto
+        assert not gates["identity_train"] and not gates["edit"] and not gates["compose"]
+
+    def test_required_tools_exist_in_registry(self):
+        from lib.pipeline_loader import load_pipeline
+
+        registry = ToolRegistry()
+        discovered = set(registry.discover("tools"))
+        manifest = load_pipeline("consistent-character-vsl")
+        for stage in manifest["stages"]:
+            # web_search is an accepted pseudo-tool (agent-native; cinematic
+            # uses it too) — everything else must be a registered tool.
+            pseudo_tools = {"web_search"}
+            for tool in stage.get("required_tools", []) + stage.get("tools_available", []):
+                if tool in pseudo_tools:
+                    continue
+                assert tool in discovered, f"stage {stage['name']} references unknown tool {tool}"
+
+    def test_identity_train_defaults_to_skip_in_skill(self):
+        skill = (
+            REPO_ROOT / "skills" / "pipelines" / "consistent-character-vsl"
+            / "identity-train-director.md"
+        ).read_text()
+        assert "SKIP" in skill and "opt-in" in skill
+
+    def test_all_referenced_skills_exist(self):
+        from lib.pipeline_loader import load_pipeline
+
+        manifest = load_pipeline("consistent-character-vsl")
+        refs = [s["skill"] for s in manifest["stages"]] + manifest["required_skills"] + [
+            manifest["orchestration"]["skill"]
+        ]
+        for ref in refs:
+            assert (REPO_ROOT / "skills" / f"{ref}.md").is_file(), f"missing skill {ref}"
+
+
+# ---- M4 review regressions: rollups, checkpoints, guards ----
+
+class TestIdentityDriftVideoEdgeCases:
+    def _judge(self, monkeypatch, scores):
+        import sys
+        import types
+
+        fake_requests = types.ModuleType("requests")
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {
+                    "choices": [{"message": {"content": json.dumps({
+                        "candidates": [
+                            {"index": i + 1, "same_person": sp, "similarity": s,
+                             "differences": []}
+                            for i, (s, sp) in enumerate(scores)
+                        ]})}}]
+                }
+
+        fake_requests.post = lambda url, **kw: _Resp()
+        monkeypatch.setitem(sys.modules, "requests", fake_requests)
+
+    def _sampler(self, monkeypatch):
+        from tools.analysis.frame_sampler import FrameSampler
+        from tools.base_tool import ToolResult
+
+        def fake_execute(self, inputs):
+            out = Path(inputs["output_dir"])
+            out.mkdir(parents=True, exist_ok=True)
+            frames = []
+            for i in range(inputs["count"]):
+                frame = out / f"frame_{i:04d}.jpg"
+                frame.write_bytes(b"jpg")
+                frames.append({"path": str(frame), "timestamp_seconds": float(i), "index": i})
+            return ToolResult(success=True, data={"frames": frames})
+
+        monkeypatch.setattr(FrameSampler, "execute", fake_execute)
+
+    def test_mixed_stills_and_videos_align_and_tag_sources(
+        self, prime_vault, tmp_path, monkeypatch
+    ):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        self._sampler(monkeypatch)
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        still = tmp_path / "still.png"
+        still.write_bytes(b"png")
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"mp4")
+        # order: still first, then 2 video frames
+        self._judge(monkeypatch, [(0.9, True), (0.8, True), (0.7, False)])
+        result = IdentityDrift().execute(
+            {
+                "reference_image_paths": [str(ref)],
+                "candidate_paths": [str(still)],
+                "video_paths": [str(video)],
+                "frames_per_video": 2,
+                "threshold": 0.75,
+            }
+        )
+        assert result.success, result.error
+        rs = result.data["results"]
+        assert "source_video" not in rs[0] and rs[0]["candidate"] == str(still)
+        assert all(r.get("source_video") == str(video) for r in rs[1:])
+        video_summary = result.data["videos"][0]
+        assert video_summary["frames_judged"] == 2
+        assert video_summary["worst_similarity"] == pytest.approx(0.7)
+
+    def test_threshold_boundary_and_same_person_false(
+        self, prime_vault, tmp_path, monkeypatch
+    ):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        self._sampler(monkeypatch)
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"mp4")
+        # frame 1 exactly at threshold (passes via >=); frame 2 high similarity
+        # but same_person=false -> fails despite the score
+        self._judge(monkeypatch, [(0.75, True), (0.9, False)])
+        result = IdentityDrift().execute(
+            {
+                "reference_image_paths": [str(ref)],
+                "video_paths": [str(video)],
+                "frames_per_video": 2,
+                "threshold": 0.75,
+            }
+        )
+        assert result.success
+        video_summary = result.data["videos"][0]
+        assert video_summary["worst_similarity"] == pytest.approx(0.75)
+        assert video_summary["passed"] is False  # same_person=false rules
+
+    def test_duplicate_videos_are_collapsed(self, prime_vault, tmp_path, monkeypatch):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        self._sampler(monkeypatch)
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"mp4")
+        self._judge(monkeypatch, [(0.9, True), (0.9, True)])
+        result = IdentityDrift().execute(
+            {
+                "reference_image_paths": [str(ref)],
+                "video_paths": [str(video), str(video)],
+                "frames_per_video": 2,
+            }
+        )
+        assert result.success
+        assert len(result.data["videos"]) == 1
+        assert result.data["videos"][0]["frames_judged"] == 2
+
+    def test_candidate_cap_fails_cleanly_before_judging(
+        self, prime_vault, tmp_path, monkeypatch
+    ):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        stills = []
+        for i in range(17):
+            p = tmp_path / f"s{i}.png"
+            p.write_bytes(b"png")
+            stills.append(str(p))
+        result = IdentityDrift().execute(
+            {"reference_image_paths": [str(ref)], "candidate_paths": stills}
+        )
+        assert result.success is False and "cap" in result.error
+
+    def test_sampler_raise_is_contained(self, prime_vault, tmp_path, monkeypatch):
+        prime_vault({"OPENROUTER_API_KEY": "o"})
+        from tools.analysis.frame_sampler import FrameSampler
+
+        def boom(self, inputs):
+            raise NotADirectoryError("identity-frames is a file")
+
+        monkeypatch.setattr(FrameSampler, "execute", boom)
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"png")
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"mp4")
+        result = IdentityDrift().execute(
+            {"reference_image_paths": [str(ref)], "video_paths": [str(video)]}
+        )
+        assert result.success is False and "Frame sampling failed" in result.error
+
+
+class TestCheckpointsForCustomStages:
+    def test_every_stage_of_this_pipeline_can_write_checkpoints(self, tmp_path, monkeypatch):
+        """A raw KeyError in lib/checkpoint.py made custom stages (e.g.
+        character_bible, identity_train) checkpoint-unwritable and their gates
+        unenforceable. (Scoped to this pipeline: some upstream manifests do not
+        validate against the manifest schema — pre-existing drift.)"""
+        import lib.checkpoint as cp
+        from lib.checkpoint import init_project, write_checkpoint
+        from lib.pipeline_loader import load_pipeline_readonly
+
+        monkeypatch.setattr(cp, "PROJECTS_DIR", tmp_path, raising=False)
+        name = "consistent-character-vsl"
+        manifest = load_pipeline_readonly(name)
+        init_project("probe-ccv", title="t", pipeline_type=name, pipeline_dir=tmp_path)
+        for stage in manifest["stages"]:
+            # in_progress needs no artifacts and must never crash — this
+            # includes the custom character_bible/identity_train stages
+            path = write_checkpoint(
+                tmp_path, "probe-ccv", stage["name"], "in_progress", {},
+                pipeline_type=name,
+            )
+            assert path.is_file(), f"{stage['name']} checkpoint failed"
+        # the custom gated stage can reach awaiting_human with its artifact
+        path = write_checkpoint(
+            tmp_path, "probe-ccv", "character_bible", "awaiting_human",
+            {"character_bible": {"character_id": "ana"}},
+            pipeline_type=name, human_approval_required=True,
+        )
+        assert path.is_file()
+        # canonical enforcement is untouched: completed proposal without its
+        # artifact must still fail
+        with pytest.raises(Exception, match="canonical artifact"):
+            write_checkpoint(
+                tmp_path, "probe-ccv", "proposal", "completed", {},
+                pipeline_type=name, human_approved=True,
+            )
+
+
+class TestManifestDriftGuards:
+    def test_budget_and_checkpoint_required(self):
+        from lib.pipeline_loader import load_pipeline
+
+        manifest = load_pipeline("consistent-character-vsl")
+        assert manifest["orchestration"]["budget_default_usd"] == pytest.approx(10.0)
+        for stage in manifest["stages"]:
+            assert stage.get("checkpoint_required") is True, stage["name"]
+
+    def test_compose_produces_final_review(self):
+        from lib.pipeline_loader import load_pipeline
+
+        manifest = load_pipeline("consistent-character-vsl")
+        compose = next(s for s in manifest["stages"] if s["name"] == "compose")
+        assert "final_review" in compose["produces"]
+
+    def test_agent_guide_lists_the_pipeline(self):
+        guide = (REPO_ROOT / "AGENT_GUIDE.md").read_text()
+        assert "consistent-character-vsl" in guide
+
+    def test_idempotency_covers_video_inputs(self):
+        tool = IdentityDrift()
+        a = tool.idempotency_key({"candidate_paths": ["x"]})
+        b = tool.idempotency_key({"candidate_paths": ["x"], "video_paths": ["v.mp4"]})
+        assert a != b
