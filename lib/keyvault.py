@@ -104,7 +104,9 @@ class KeyVault:
             sources.setdefault(key, []).append(name)
             if key not in self._secrets:
                 self._entries.append(KeyEntry(alias=key[1], provider=key[0]))
-                self._secrets[key] = value
+                # strip: a stray CR/LF in a secret would make requests raise
+                # InvalidHeader with the full key repr'd into the message
+                self._secrets[key] = value.strip()
         self._conflicts = {k: v for k, v in sources.items() if len(v) > 1}
         self._entries.sort(key=lambda k: (k.provider, k.alias))
 
@@ -134,7 +136,7 @@ class KeyVault:
             key = (provider, alias)
             existing = self._find(provider, alias)
             if raw.get("secret"):
-                self._secrets[key] = raw["secret"]
+                self._secrets[key] = str(raw["secret"]).strip()
                 if existing:
                     existing.label = raw.get("label", existing.label)
                     existing.cap_usd = raw.get("cap_usd", existing.cap_usd)
@@ -202,7 +204,7 @@ class KeyVault:
             return self._secret_for(provider, "main")
         for env_name in _DEFAULT_ENV.get(provider, ()):
             if self._env.get(env_name):
-                return self._env[env_name]
+                return self._env[env_name].strip()
         if len(named) == 1:
             return self._secret_for(provider, named[0].alias)
         if named:
