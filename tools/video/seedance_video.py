@@ -6,7 +6,6 @@ and lip-sync from quoted dialogue in prompts.
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -145,6 +144,13 @@ class SeedanceVideo(BaseTool):
                 "type": "integer",
                 "description": "Optional seed for reproducibility",
             },
+            "key_alias": {
+                "type": "string",
+                "description": (
+                    "Named key alias to bill this call to (PERSONA_KEY_fal_<alias> "
+                    "in .env, see lib/keyvault.py). Defaults to 'main', then FAL_KEY."
+                ),
+            },
             "output_path": {"type": "string"},
         },
     }
@@ -159,8 +165,15 @@ class SeedanceVideo(BaseTool):
         "Watch generated clip for motion coherence, audio sync, and visual quality"
     ]
 
-    def _get_api_key(self) -> str | None:
-        return os.environ.get("FAL_KEY") or os.environ.get("FAL_AI_API_KEY")
+    def _get_api_key(self, key_alias: str | None = None) -> str | None:
+        """Resolve the fal key via the named-key vault (PERSONA_KEY_fal_<alias>),
+        falling back to the conventional FAL_KEY / FAL_AI_API_KEY env vars."""
+        from lib.keyvault import get_vault
+
+        try:
+            return get_vault().resolve("fal", key_alias)
+        except KeyError:
+            return None
 
     def get_status(self) -> ToolStatus:
         if self._get_api_key():
@@ -179,12 +192,13 @@ class SeedanceVideo(BaseTool):
         return 60.0 if variant == "fast" else 120.0
 
     def execute(self, inputs: dict[str, Any]) -> ToolResult:
-        api_key = self._get_api_key()
-        if not api_key:
-            return ToolResult(
-                success=False,
-                error="FAL_KEY not set. " + self.install_instructions,
-            )
+        from lib.keyvault import get_vault
+
+        try:
+            api_key = get_vault().resolve("fal", inputs.get("key_alias"))
+        except KeyError as exc:
+            detail = exc.args[0] if exc.args else str(exc)
+            return ToolResult(success=False, error=f"{detail} {self.install_instructions}")
 
         import requests
 
@@ -216,15 +230,21 @@ class SeedanceVideo(BaseTool):
                 payload["image_url"] = inputs["image_url"]
             elif inputs.get("image_path"):
                 from tools.video._shared import upload_image_fal
-                payload["image_url"] = upload_image_fal(inputs["image_path"])
+                try:
+                    payload["image_url"] = upload_image_fal(inputs["image_path"], api_key=api_key)
+                except Exception as e:
+                    return ToolResult(success=False, error=f"fal image upload failed: {e}")
             if inputs.get("end_image_url"):
                 payload["end_image_url"] = inputs["end_image_url"]
 
         if operation == "reference_to_video":
             ref_image_urls = list(inputs.get("reference_image_urls") or [])
-            for local_path in inputs.get("reference_image_paths") or []:
-                from tools.video._shared import upload_image_fal
-                ref_image_urls.append(upload_image_fal(local_path))
+            from tools.video._shared import upload_image_fal
+            try:
+                for local_path in inputs.get("reference_image_paths") or []:
+                    ref_image_urls.append(upload_image_fal(local_path, api_key=api_key))
+            except Exception as e:
+                return ToolResult(success=False, error=f"fal reference image upload failed: {e}")
             # Seedance 2.0 reference-to-video ceilings: 9 images + 3 video + 3 audio.
             if len(ref_image_urls) > 9:
                 return ToolResult(
