@@ -1,0 +1,30 @@
+# Consistent-character VSL: lock identity with a trained LoRA, then animate each scene.
+# Follows OpenMontage's research -> ... -> compose flow with two new stages (character_bible,
+# identity_train) and a per-scene identity loop.
+name: consistent-character-vsl
+description: Long-form VSL with one+ trained characters across many varied scenes.
+render_runtime: hyperframes            # Apache-2.0, product-safe (Remotion optional)
+gates: [character, budget]             # human approval points
+stages:
+  - research
+  - proposal
+  - script
+  - scene_plan
+  - character_bible                    # reference sheet + fixed identity block (nano_banana_pro)
+  - identity_train                     # LoRA on fal/Replicate (lora_train) -> the "Soul"
+  - per_scene:
+      - keyframe_lock                  # identity-locked still (keyframe_lock)
+      - animate                        # talking->seedance ; action->kling
+      - voice                          # en: seedance native ; ro/long: eleven + infinitetalk
+      - identity_review                # drift vs reference sheet (identity_drift)
+  - identity_review_cross_scene        # drift across the whole set
+  - edit
+  - compose
+defaults:
+  keyframe:        { tool: nano_banana_pro, provider: openrouter }
+  animate_talking: { tool: seedance,        provider: kie }
+  animate_action:  { tool: kling,           provider: fal }
+  identity_train:  { tool: lora_train,      provider: fal }
+  tts:             { provider: eleven }
+  lipsync:         { tool: infinitetalk,    provider: fal }
+budget: { estimate: true, cap_usd: 80, approval_threshold_usd: 0.5 }

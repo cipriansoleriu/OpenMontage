@@ -1,0 +1,12 @@
+name: podcast-intercut
+description: Two+ consistent speakers as SINGLE-SPEAKER intercut shots (never a one-frame two-shot).
+render_runtime: hyperframes
+gates: [character, budget]
+stages: [research, proposal, script, scene_plan, character_bible, identity_train,
+         per_scene: [keyframe_lock, animate, voice, identity_review], edit, compose]
+defaults:
+  keyframe:        { tool: nano_banana_pro, provider: openrouter }
+  animate_talking: { tool: seedance,        provider: kie }
+  identity_train:  { tool: lora_train,      provider: fal }
+  tts:             { provider: eleven }
+budget: { estimate: true, cap_usd: 60, approval_threshold_usd: 0.5 }

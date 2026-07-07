@@ -1,0 +1,10 @@
+name: ugc-talking-head
+description: Lean UGC ad — one presenter to camera. Skips LoRA when one locked reference suffices.
+render_runtime: hyperframes
+gates: [character, budget]
+stages: [research, proposal, script, scene_plan, character_bible,
+         per_scene: [keyframe_lock, animate, identity_review], edit, compose]
+defaults:
+  keyframe:        { tool: nano_banana_pro, provider: openrouter }
+  animate_talking: { tool: seedance,        provider: kie }
+budget: { estimate: true, cap_usd: 25, approval_threshold_usd: 0.5 }

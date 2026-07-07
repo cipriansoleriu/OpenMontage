@@ -1,0 +1,11 @@
+This project is a fork of OpenMontage (https://github.com/calesthio/OpenMontage),
+licensed under the GNU AGPL-3.0. Substantial portions of this software (the pipeline
+engine, tool registry, provider selector, budget governance, QC gates, and the
+Remotion/HyperFrames compositor) are the work of the OpenMontage authors and remain
+under AGPL-3.0.
+
+Additions in this fork (named-key vault, Seedance/OpenRouter/Kie tools, the
+consistent-character LoRA pipeline and its tools/skills) are also released under AGPL-3.0
+as part of this combined work.
+
+If this work is ever offered over a network or distributed, AGPL-3.0 obligations apply.
