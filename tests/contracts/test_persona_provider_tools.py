@@ -402,3 +402,116 @@ def test_openrouter_image_to_video_sends_frame_type(prime_vault):
     )
     assert body["frame_images"][0]["frame_type"] == "first_frame"
     assert body["frame_images"][1]["frame_type"] == "last_frame"
+
+
+# ---- Kie upload bridge regressions (M3): local files, no FAL_KEY needed ----
+
+def test_upload_file_error_branches(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from tools._kie.client import KieJobError, upload_file
+
+    with pytest.raises(KieJobError, match="not found"):
+        upload_file("/nope/x.png", "k")
+
+    src = tmp_path / "x.png"
+    src.write_bytes(b"png")
+    fake_requests = types.ModuleType("requests")
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"success": False, "code": 455, "msg": "quota"}
+
+    fake_requests.post = lambda url, **kw: _Resp()
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+    with pytest.raises(KieJobError, match="455"):
+        upload_file(str(src), "k")
+
+
+def test_seedance_kie_image_path_uploads_with_named_key(prime_vault, monkeypatch, tmp_path):
+    import lib.keyvault as kv2
+    from lib.keyvault import KeyVault as KV
+
+    monkeypatch.setattr(
+        kv2, "_vault",
+        KV(env={"PERSONA_KEY_kie_client": "named-secret"}, keys_file=NO_KEYS_FILE),
+    )
+    frame = tmp_path / "frame.png"
+    frame.write_bytes(b"png")
+    seen: dict[str, object] = {}
+
+    import tools._kie.client as kie_client
+
+    def fake_upload(path, api_key, **kwargs):
+        seen["api_key"] = api_key
+        return "https://tempfile.example/frame.png"
+
+    def fake_run_job(model, payload, api_key, **kwargs):
+        seen["payload"] = payload
+        raise RuntimeError("stop-before-network")
+
+    monkeypatch.setattr(kie_client, "upload_file", fake_upload)
+    monkeypatch.setattr(kie_client, "run_job", fake_run_job)
+    result = SeedanceKie().execute(
+        {
+            "prompt": "x",
+            "operation": "image_to_video",
+            "image_path": str(frame),
+            "key_alias": "client",
+        }
+    )
+    assert seen["api_key"] == "named-secret"
+    assert seen["payload"]["first_frame_url"] == "https://tempfile.example/frame.png"
+    assert result.success is False and "stop-before-network" in result.error
+
+
+def test_nano_banana_image_paths_upload_and_merge(prime_vault, monkeypatch, tmp_path):
+    prime_vault({"KIE_AI_API_KEY": "k"})
+    local = tmp_path / "ref.png"
+    local.write_bytes(b"png")
+    seen: dict[str, object] = {}
+
+    import tools._kie.client as kie_client
+
+    monkeypatch.setattr(
+        kie_client, "upload_file", lambda path, api_key, **kw: "https://up/ref.png"
+    )
+
+    def fake_run_job(model, payload, api_key, **kwargs):
+        seen["payload"] = payload
+        raise RuntimeError("stop-before-network")
+
+    monkeypatch.setattr(kie_client, "run_job", fake_run_job)
+    NanoBananaPro().execute(
+        {
+            "prompt": "x",
+            "image_input": ["https://existing/a.png"],
+            "image_paths": [str(local)],
+        }
+    )
+    assert seen["payload"]["image_input"] == ["https://existing/a.png", "https://up/ref.png"]
+
+
+def test_nano_banana_caps_references_before_uploading(prime_vault, monkeypatch, tmp_path):
+    prime_vault({"KIE_AI_API_KEY": "k"})
+    local = tmp_path / "ref.png"
+    local.write_bytes(b"png")
+
+    import tools._kie.client as kie_client
+
+    def must_not_upload(path, api_key, **kwargs):
+        raise AssertionError("upload_file must not be called for an over-limit request")
+
+    monkeypatch.setattr(kie_client, "upload_file", must_not_upload)
+    result = NanoBananaPro().execute(
+        {
+            "prompt": "x",
+            "image_input": [f"https://e/{i}.png" for i in range(8)],
+            "image_paths": [str(local)],
+        }
+    )
+    assert result.success is False and "8" in result.error

@@ -97,3 +97,12 @@ venv/
 
 # Backlot local cache (thumbnails)
 .backlot/
+
+# Persona fork: reusable character store (lib/character_registry.py)
+characters/
+
+# Persona fork: default tool outputs (when output_path is omitted)
+nano_banana_pro_output.*
+seedance_kie_output.*
+seedance_openrouter_output.*
+keyframe_lock_output.*

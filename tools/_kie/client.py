@@ -47,8 +47,11 @@ def run_job(
     api_key = (api_key or "").strip()
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
+    # 60s: createTask has been observed to exceed 30s under load. No automatic
+    # retry on read-timeout — the task may have been created server-side, and a
+    # blind re-POST would double-bill.
     resp = requests.post(
-        CREATE_URL, headers=headers, json={"model": model, "input": input_payload}, timeout=30
+        CREATE_URL, headers=headers, json={"model": model, "input": input_payload}, timeout=60
     )
     resp.raise_for_status()
     body = resp.json()
@@ -95,6 +98,50 @@ def run_job(
         f"Kie task {task_id} timed out after {int(timeout_seconds)}s. "
         f"It may still complete — check https://kie.ai/logs"
     )
+
+
+def upload_file(
+    path: str | Path,
+    api_key: str,
+    *,
+    upload_path: str = "images/persona",
+    timeout: int = 120,
+) -> str:
+    """Upload a local file to Kie temp storage; returns a public downloadUrl.
+
+    Same KIE_AI_API_KEY as the jobs API — this is what makes a Kie-only
+    keyframe->animate loop possible without FAL_KEY. URLs live ~3 days, so
+    upload immediately before the generation that consumes them. A unique
+    fileName is derived from the content hash to dodge same-name cache staleness.
+    """
+    import hashlib
+
+    import requests
+
+    src = Path(path)
+    if not src.is_file():
+        raise KieJobError(f"Upload source not found: {src}")
+    api_key = (api_key or "").strip()
+    digest = hashlib.sha256(src.read_bytes()).hexdigest()[:16]
+    file_name = f"{src.stem}-{digest}{src.suffix}"
+    # NOTE: uploads live on the redpandaai host, NOT api.kie.ai (404 there) —
+    # verified live 2026-07-07; downloadUrls come back on tempfile.redpandaai.co.
+    with open(src, "rb") as fh:
+        resp = requests.post(
+            "https://kieai.redpandaai.co/api/file-stream-upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": (file_name, fh)},
+            data={"uploadPath": upload_path, "fileName": file_name},
+            timeout=timeout,
+        )
+    resp.raise_for_status()
+    body = resp.json()
+    url = (body.get("data") or {}).get("downloadUrl")
+    if not body.get("success") or not url:
+        raise KieJobError(
+            f"Kie file upload failed: code={body.get('code')} msg={body.get('msg')}"
+        )
+    return url
 
 
 def download(url: str, output_path: str | Path, *, timeout: int = 300) -> Path:

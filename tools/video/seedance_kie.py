@@ -3,8 +3,9 @@
 The budget route to Seedance 2.0: Kie's per-second rates run well below the
 fal.ai path (720p: ~$0.205/s text-only, ~$0.125/s with references, vs ~$0.30/s
 on fal), with the same reference-to-video surface (9 images + 3 videos + 3
-audio). Inputs must be public URLs — Kie has no local-upload helper here.
-API contract cached in docs-cache/kie-seedance-2.md.
+audio). Local files are auto-uploaded to Kie temp storage on the same key
+(tools/_kie/client.upload_file), so a Kie-only keyframe->animate loop needs
+no FAL_KEY. API contract cached in docs-cache/kie-seedance-2.md.
 """
 
 from __future__ import annotations
@@ -111,7 +112,6 @@ class SeedanceKie(BaseTool):
     ]
     not_good_for = [
         "offline generation",
-        "local file inputs (Kie needs public URLs)",
         "seed-reproducible outputs",
     ]
     fallback_tools = ["seedance_video", "seedance_openrouter", "seedance_replicate"]
@@ -160,14 +160,30 @@ class SeedanceKie(BaseTool):
                 "type": "string",
                 "description": "Public start-frame URL for image_to_video (maps to first_frame_url)",
             },
+            "image_path": {
+                "type": "string",
+                "description": (
+                    "Local start-frame path — auto-uploaded to Kie temp storage with "
+                    "the same key (no FAL_KEY needed)"
+                ),
+            },
             "end_image_url": {
                 "type": "string",
                 "description": "Optional public end-frame URL (maps to last_frame_url)",
+            },
+            "end_image_path": {
+                "type": "string",
+                "description": "Optional local end-frame path — auto-uploaded via Kie",
             },
             "reference_image_urls": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Up to 9 public reference image URLs for reference_to_video",
+            },
+            "reference_image_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Local reference image paths — auto-uploaded via Kie",
             },
             "reference_video_urls": {
                 "type": "array",
@@ -196,8 +212,9 @@ class SeedanceKie(BaseTool):
     retry_policy = RetryPolicy(max_retries=2, retryable_errors=["rate_limit", "timeout"])
     idempotency_key_fields = [
         "prompt", "operation", "model_variant", "duration", "resolution", "aspect_ratio",
-        "generate_audio", "image_url", "end_image_url",
-        "reference_image_urls", "reference_video_urls", "reference_audio_urls",
+        "generate_audio", "image_url", "image_path", "end_image_url", "end_image_path",
+        "reference_image_urls", "reference_image_paths",
+        "reference_video_urls", "reference_audio_urls",
     ]
     side_effects = ["writes video file to output_path", "calls Kie.ai API"]
     user_visible_verification = [
@@ -229,7 +246,8 @@ class SeedanceKie(BaseTool):
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
         """Never raises — selectors call this unwrapped during ranking."""
-        rates = _RATES.get(inputs.get("resolution", "720p"), _RATES["720p"])
+        resolution = inputs.get("resolution", "720p")
+        rates = _RATES.get(resolution, _RATES["720p"]) if isinstance(resolution, str) else _RATES["720p"]
         rate = rates[1] if self._has_references(inputs) else rates[0]
         try:
             duration = _coerce_duration(inputs.get("duration"))
@@ -240,8 +258,10 @@ class SeedanceKie(BaseTool):
     def estimate_runtime(self, inputs: dict[str, Any]) -> float:
         return 240.0 if inputs.get("model_variant") == "fast" else 300.0
 
-    def _build_payload(self, inputs: dict[str, Any]) -> dict[str, Any]:
-        """Shape and validate the Kie input payload. Raises _InputError."""
+    def _build_payload(self, inputs: dict[str, Any], upload) -> dict[str, Any]:
+        """Shape and validate the Kie input payload. Raises _InputError on bad
+        inputs; `upload` (path -> public URL) may raise network errors that the
+        caller converts to a redacted ToolResult."""
         if not inputs.get("prompt"):
             raise _InputError("'prompt' is required")
         operation = inputs.get("operation", "text_to_video")
@@ -258,16 +278,23 @@ class SeedanceKie(BaseTool):
             payload["generate_audio"] = inputs["generate_audio"]
 
         if operation == "image_to_video":
-            if not inputs.get("image_url"):
+            if inputs.get("image_url"):
+                payload["first_frame_url"] = inputs["image_url"]
+            elif inputs.get("image_path"):
+                payload["first_frame_url"] = upload(inputs["image_path"])
+            else:
                 raise _InputError(
-                    "image_to_video requires 'image_url' (a public URL; Kie has no local upload)"
+                    "image_to_video requires 'image_url' (public URL) or 'image_path' (local file)"
                 )
-            payload["first_frame_url"] = inputs["image_url"]
             if inputs.get("end_image_url"):
                 payload["last_frame_url"] = inputs["end_image_url"]
+            elif inputs.get("end_image_path"):
+                payload["last_frame_url"] = upload(inputs["end_image_path"])
 
         if operation == "reference_to_video":
             ref_images = _url_list(inputs.get("reference_image_urls"), "reference_image_urls")
+            for local_path in _url_list(inputs.get("reference_image_paths"), "reference_image_paths"):
+                ref_images.append(upload(local_path))
             ref_videos = _url_list(inputs.get("reference_video_urls"), "reference_video_urls")
             ref_audio = _url_list(inputs.get("reference_audio_urls"), "reference_audio_urls")
             # Seedance 2.0 reference ceilings: 9 images + 3 videos + 3 audio.
@@ -308,12 +335,20 @@ class SeedanceKie(BaseTool):
             detail = exc.args[0] if exc.args else str(exc)
             return ToolResult(success=False, error=f"{detail} {self.install_instructions}")
 
+        def _upload(path: str) -> str:
+            from tools._kie.client import upload_file
+
+            return upload_file(path, api_key)
+
         try:
-            payload = self._build_payload(inputs)
+            payload = self._build_payload(inputs, _upload)
         except _InputError as exc:
             return ToolResult(success=False, error=str(exc))
         except Exception as exc:
-            return ToolResult(success=False, error=f"Invalid inputs: {exc}")
+            return ToolResult(
+                success=False,
+                error=self._redact(f"Input preparation failed: {exc}", api_key),
+            )
 
         start = time.time()
         variant = inputs.get("model_variant", "standard")
@@ -355,6 +390,8 @@ class SeedanceKie(BaseTool):
                 "generate_audio": inputs.get("generate_audio", True),
                 "task_id": job["task_id"],
                 "credits_consumed": job["credits_consumed"],
+                # Remote copies (expire ~24h) — handy for chaining
+                "result_urls": result_urls,
                 "output": str(output_path),
                 "output_path": str(output_path),
                 "format": "mp4",

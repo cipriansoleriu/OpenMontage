@@ -72,7 +72,6 @@ class NanoBananaPro(BaseTool):
     ]
     not_good_for = [
         "offline generation",
-        "local file inputs (Kie needs public URLs)",
         "seed-reproducible outputs",
     ]
     fallback_tools = ["flux_image", "google_imagen", "openai_image"]
@@ -97,6 +96,14 @@ class NanoBananaPro(BaseTool):
                 "description": (
                     "Selector-canonical alias for image_input — merged into it, "
                     "so image_selector edit-mode calls reach this tool intact"
+                ),
+            },
+            "image_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Local reference image paths — auto-uploaded to Kie temp storage "
+                    "with the same key (no FAL_KEY needed) and merged into image_input"
                 ),
             },
             "aspect_ratio": {
@@ -130,7 +137,8 @@ class NanoBananaPro(BaseTool):
     )
     retry_policy = RetryPolicy(max_retries=2, retryable_errors=["rate_limit", "timeout"])
     idempotency_key_fields = [
-        "prompt", "resolution", "aspect_ratio", "output_format", "image_input", "image_urls",
+        "prompt", "resolution", "aspect_ratio", "output_format",
+        "image_input", "image_urls", "image_paths",
     ]
     side_effects = ["writes image file to output_path", "calls Kie.ai API"]
     user_visible_verification = [
@@ -153,7 +161,11 @@ class NanoBananaPro(BaseTool):
         return ToolStatus.UNAVAILABLE
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
-        return _COST.get(inputs.get("resolution", "1K"), _COST["1K"])
+        """Never raises — selectors call this unwrapped during ranking."""
+        resolution = inputs.get("resolution", "1K")
+        if not isinstance(resolution, str):
+            return _COST["1K"]
+        return _COST.get(resolution, _COST["1K"])
 
     def estimate_runtime(self, inputs: dict[str, Any]) -> float:
         return 60.0
@@ -182,13 +194,28 @@ class NanoBananaPro(BaseTool):
             for url in _url_list(inputs.get("image_urls"), "image_urls"):
                 if url not in references:
                     references.append(url)
+            local_paths = _url_list(inputs.get("image_paths"), "image_paths")
         except _InputError as exc:
             return ToolResult(success=False, error=str(exc))
-        if len(references) > 8:
+        # Cap BEFORE uploading — an over-limit call must not spend uploads first.
+        if len(references) + len(local_paths) > 8:
             return ToolResult(
                 success=False,
-                error=f"Nano Banana Pro accepts at most 8 reference images; got {len(references)}",
+                error=(
+                    f"Nano Banana Pro accepts at most 8 reference images; "
+                    f"got {len(references) + len(local_paths)}"
+                ),
             )
+        if local_paths:
+            try:
+                from tools._kie.client import upload_file
+
+                references.extend(upload_file(p, api_key) for p in local_paths)
+            except Exception as exc:
+                return ToolResult(
+                    success=False,
+                    error=self._redact(f"Kie reference upload failed: {exc}", api_key),
+                )
 
         start = time.time()
         payload: dict[str, Any] = {"prompt": inputs["prompt"]}
@@ -232,6 +259,9 @@ class NanoBananaPro(BaseTool):
                 "resolution": inputs.get("resolution", "1K"),
                 "task_id": job["task_id"],
                 "credits_consumed": job["credits_consumed"],
+                # Remote copies (expire ~24h) — handy for chaining into
+                # reference inputs of a follow-up generation.
+                "result_urls": result_urls,
                 "output": str(output_path),
                 "output_path": str(output_path),
                 "format": ext,
