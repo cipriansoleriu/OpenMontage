@@ -25,13 +25,18 @@ https://docs.kie.ai/market/bytedance/seedance-2-fast , https://kie.ai/seedance-2
 
 No `seed` parameter. Inputs must be public URLs (or Kie `asset://`).
 
-## Pricing (per second, from kie.ai Seedance 2.0 page via search index, 2026-07)
-| resolution | text-only | with reference |
-|---|---|---|
-| 480p | $0.095 | $0.0575 |
-| 720p | $0.205 | $0.125 |
-| 1080p | $0.51 | $0.31 |
-| 4k | undocumented (est. ~2× 1080p) | undocumented |
+## Pricing (per second)
+**OBSERVED BILLING (2026-07-07/08 acceptance run) contradicts the advertised
+with-reference discount: 720p billed FLAT $0.205/s (41cr/s) on BOTH
+image_to_video and reference_to_video (410cr for a 10s r2v clip).** Budget at
+the flat rate; the marketing-page table below is retained for reference only.
 
-`recordInfo.creditsConsumed` is authoritative; treat the table as estimates.
+| resolution | advertised text-only | advertised with-ref | observed |
+|---|---|---|---|
+| 480p | $0.095 | $0.0575 | unverified |
+| 720p | $0.205 | $0.125 | **$0.205 flat** |
+| 1080p | $0.51 | $0.31 | unverified |
+| 4k | undocumented | undocumented | unverified |
+
+`recordInfo.creditsConsumed` is authoritative (1 credit ≈ $0.005 observed).
 Comparison: fal.ai seedance_video ≈ $0.3034/s standard, $0.2419/s fast.

@@ -27,14 +27,16 @@ from tools.base_tool import (
     ToolTier,
 )
 
-# Per-second estimates from docs-cache/kie-seedance-2.md (text-only, with-ref).
-# 4k is undocumented — extrapolated at 2x 1080p so budgets overestimate rather
-# than understate. recordInfo.creditsConsumed is the authoritative spend.
+# Per-second estimates (text-only, with-ref). The docs advertise a
+# with-reference discount, but observed billing (2026-07-07/08 acceptance run)
+# was FLAT $0.205/s at 720p on both image_to_video and reference_to_video
+# (410cr/10s) — assume no discount so budgets never understate. 4k is
+# undocumented, extrapolated 2x 1080p. creditsConsumed is authoritative.
 _RATES = {
-    "480p": (0.095, 0.0575),
-    "720p": (0.205, 0.125),
-    "1080p": (0.51, 0.31),
-    "4k": (1.02, 0.62),
+    "480p": (0.095, 0.095),
+    "720p": (0.205, 0.205),
+    "1080p": (0.51, 0.51),
+    "4k": (1.02, 1.02),
 }
 
 _DEFAULT_DURATION = 5
