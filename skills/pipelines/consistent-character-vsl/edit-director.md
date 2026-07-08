@@ -30,11 +30,20 @@ asset_manifest), `in_seconds`/`out_seconds` trimmed to the narration timing.
 Trim clip heads/tails that drift (generated clips often need 0.2-0.5s off the
 ends). Total duration must match the approved script timing.
 
+Retention pacing (optional): documentary-style VSLs hold attention better
+rendered at **+8-10% uniform speed**, applied once to the assembled
+video+audio at the very end so sync is preserved — never per-cut. Only
+propose it when the locked runtime supports a global speed factor, and as a
+user decision, never a silent default.
+
 ### Step 3: Audio
 
 Narration segments mapped to cut timings (`audio.narration.segments`);
 music track per the proposal decision with volume + fade under narration
 (`audio.music`); mix levels sanity-checked (`audio_mixer` if pre-mixing).
+Generated-clip ambient is fake-speech gibberish — hold it at a fixed LOW
+level ducked under narration, never normalize it up (that amplifies the
+mumble); drop it entirely if it distracts.
 
 ### Step 4: Subtitles and overlays
 
@@ -42,6 +51,17 @@ Subtitles from the script (burn decision per platform: 9:16 social defaults to
 burned captions). CTA text belongs to compose-time overlays, never baked into
 generated video. Keep overlay copy short and in the script's voice — no em
 dashes in customer-facing text.
+
+Text-card / CTA overlay design: full-screen statement and CTA cards sit on a
+near-black contrast ground with white text plus the SINGLE brand accent — a
+glowing accent pill for the CTA button; data/report cards stay light on
+white/off-white. State overlay copy as "reads exactly: <text>" — no
+paraphrase room for the renderer or a generation model.
+
+Burned-caption craft: white words with a strong dark outline — verify
+legibility over a light frame AND a dark one; each word fills to the brand
+accent as spoken, subtle scale-pop per phrase, bottom-centre text-safe.
+Skip captions on full-screen text-card scenes — they already show text.
 
 ### Step 5: Self-Evaluate and Submit
 
