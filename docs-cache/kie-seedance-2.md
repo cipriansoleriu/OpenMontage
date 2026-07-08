@@ -39,4 +39,9 @@ the flat rate; the marketing-page table below is retained for reference only.
 | 4k | undocumented | undocumented | unverified |
 
 `recordInfo.creditsConsumed` is authoritative (1 credit ≈ $0.005 observed).
-Comparison: fal.ai seedance_video ≈ $0.3034/s standard, $0.2419/s fast.
+Observed variant split (2026-07-08 bake-off): **fast i2v = 33cr/s ≈ $0.165/s**
+(132cr/4s); standard + r2v = 41cr/s ≈ $0.205/s. seedance_kie.estimate_cost
+deliberately uses the flat $0.205/s for both (never understate budgets).
+Comparison: fal.ai seedance_video ≈ $0.3034/s standard, $0.2419/s fast;
+Kie gemini-omni-video ≈ $0.08/s at 720p (63cr/4s) — cheap, but failed the
+identity bake-off (0.45) so it is a B-roll option only.
