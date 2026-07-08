@@ -65,6 +65,15 @@ talking/action split with the EXISTING `type` enum — never invent fields:
 A standard VSL alternates: talking hook → action problem illustration →
 talking solution → action proof/demo → talking CTA.
 
+**Presenter loops are a third planning case**: a VO-led beat that keeps the
+character on camera is NOT a talking beat. Tag it `type: "character_scene"`
+(it routes as an action beat — no native audio) and name a presenter-loop
+pattern from the asset-director's library in the scene `description` (e.g.
+"presenter loop: engaged listener"). Talking-motion under an unrelated VO
+always reads as broken lip-sync — the loop must be a CLOSED-MOUTH presence
+shot, and `type: "talking_head"` is reserved for beats where the character
+genuinely speaks with native audio.
+
 On-camera ratio: when the concept is demo- or action-led (typical
 short-form), keep the character's on-camera talking time near or under
 ~30% of runtime — lead with demonstration and let VO carry the argument. A

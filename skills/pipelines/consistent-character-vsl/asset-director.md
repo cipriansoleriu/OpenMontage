@@ -53,6 +53,46 @@ Model mix from the proposal, honored per scene_type:
 - **action** → `kling_video` (fal) `image_to_video` from the keyframe; or
   Seedance `reference_to_video` with character refs when motion needs
   identity anchoring beyond the first frame.
+- **presenter loop (VO-led, character on camera)** → the patterns below.
+  This is its own animation mode, learned the expensive way: a
+  talking-motion clip under an unrelated voiceover ALWAYS reads as broken
+  lip-sync. Presenter loops are CLOSED-MOUTH presence shots.
+
+#### Presenter-loop prompt library (closed-mouth presence under VO)
+
+The iron law, appended verbatim to EVERY presenter-loop motion prompt:
+
+> "Her mouth stays CLOSED the entire time — she is NOT talking; lips gently
+> together, no mouthing, no whispering. No hand-talking gestures."
+
+Generation rules for all patterns:
+
+- `generate_audio: false` — presenter loops carry the VO track, and
+  generated ambient is fake-speech gibberish (see edit-director ducking note).
+- **Loopability**: motion must be subtle, continuous, and end near the
+  opening pose ("the motion is gentle and cyclical, ending in a pose close
+  to the first frame"). Ban one-way events inside a loop: no drinking to
+  completion, no standing up, no exiting frame, no completed gestures.
+- **Energy matches the VO**: a placid loop under a fired-up narration reads
+  dead — give the VO's emotion a physical carrier (firmer nods, a lean-in)
+  while the mouth stays closed. Match pattern energy to the beat below.
+- Renderer: `seedance_kie` `image_to_video` fast from the scene keyframe,
+  same as any i2v clip; the pattern text IS the motion prompt.
+
+| # | Pattern | Motion prompt core | Best for beat |
+|---|---|---|---|
+| 1 | **Engaged listener** | "She looks into the camera with soft steady eye contact, slow natural blinks, slight head tilts and small affirming nods, calm breathing, faint changes of expression" | solution, authority, trust beats |
+| 2 | **Prop business** | "She cradles the mug in both hands, lifts it slightly without drinking, thumb strokes the rim, a thoughtful glance down and back up to camera" | problem/empathy beats, kitchen-table authenticity (the original M4 fix) |
+| 3 | **Reflective look-away** | "Her gaze drifts toward the window light, a small exhale, then returns to the camera with quiet resolve; shoulders soften" | agitation, story, dead-end beats |
+| 4 | **Working presence** | "Seen in three-quarter view, she [writes on the pad / turns a page / rests a hand on the dog], absorbed in the task, face clearly visible, occasional glance toward camera" | proof and demonstration-adjacent beats |
+| 5 | **Walking presence** | "She walks at a steady natural pace [toward / alongside] the camera, neutral-calm expression, eyes ahead then briefly to lens, ambient world motion around her" | transitions, future-pacing beats |
+| 6 | **Warm close** | "A subtle smile forms with lips together, a single slow nod, steady warm eye contact held to the end of the shot" | CTA underlay, pressure-free close |
+
+Anti-patterns (regenerate on sight): visible mouth movement of any kind;
+gesture rhythms that mimic speech emphasis; loop seams (pose at cut point
+far from the start frame); energy mismatch with the VO underneath. True
+talking belongs ONLY to native-audio talking beats — never fake it with
+motion under VO.
 
 Duration 4-15s per the scene_plan. Deviating from the approved model mix is a
 user decision, not a fallback — escalate per "No Unilateral Substitutions".
