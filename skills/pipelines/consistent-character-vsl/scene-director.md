@@ -28,6 +28,29 @@ the last frame or needs slow-mo. If VO isn't measured yet, default talky
 beats to 7-8s. Trimming a long clip at edit is free; fixing a short one
 costs a regeneration.
 
+Beat-level pacing inside the scene envelope:
+
+- The hook owns 0:00-0:03 — its scene opens mid-action, no establishing
+  preamble.
+- Think in beats, not just scenes: short-form pacing wants a visual change
+  every 2-5s, so a single generated 4-15s scene can carry 2-3 beats the
+  edit will cut between. A VO line that doesn't fit its beat gets
+  shortened, not stretched.
+- Extending to a longer cut adds 2-3 beats (deeper proof, a stronger
+  close); the hook stays identical.
+
+Beat→visual mapping — plan each beat as a table row: WHAT IS LITERALLY ON
+SCREEN, and the VO line over it (or "caption only" when a beat carries no
+narration). A description that names a mood but not what's on screen is not
+a plan. Two rules:
+
+- **Money visual**: every claim in the script gets its single most
+  demonstrable visual moment, and that moment leads the scene — the scene
+  proves its beat's claim, never generic B-roll.
+- **Overlay text is declared with its beat** (exact wording, marked as an
+  overlay in `required_assets`) so it flows to the edit stage — never into
+  the generated footage (Step 4 rule).
+
 ### Step 2: Scene-type tagging (drives the model mix — schema-legal encoding)
 
 The scene_plan schema is strict (`additionalProperties: false`); encode the
@@ -41,6 +64,12 @@ talking/action split with the EXISTING `type` enum — never invent fields:
 
 A standard VSL alternates: talking hook → action problem illustration →
 talking solution → action proof/demo → talking CTA.
+
+On-camera ratio: when the concept is demo- or action-led (typical
+short-form), keep the character's on-camera talking time near or under
+~30% of runtime — lead with demonstration and let VO carry the argument. A
+presenter-led VSL can run higher, but every talking beat must earn the
+face: the hook, the turn, the CTA.
 
 ### Step 3: Keyframe briefs and continuity
 
