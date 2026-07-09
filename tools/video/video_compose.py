@@ -2600,7 +2600,11 @@ class VideoCompose(BaseTool):
 
     @staticmethod
     def _build_subtitle_style(style: dict) -> str:
-        """Build ASS force_style string from style dict."""
+        """Build ASS force_style string from style dict.
+
+        Sizes are libass PlayResY=288 units, NOT output pixels: FontSize=13
+        renders ~49px tall at 1080p. Pixel-ish values (e.g. 40) fill the frame.
+        """
         parts = []
         parts.append(f"FontName={style.get('font', 'Inter')}")
         parts.append(f"FontSize={style.get('font_size', 28)}")
