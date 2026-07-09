@@ -68,6 +68,19 @@ class MusicGen(BaseTool):
                     "Omitting this defaults to 60s which may not match your video."
                 ),
             },
+            "composition_plan": {
+                "type": "object",
+                "description": (
+                    "ElevenLabs composition plan (sections with localStyles + "
+                    "duration_ms). When provided, it is sent INSTEAD of prompt/"
+                    "music_length_ms (API accepts one or the other) — use for "
+                    "scores whose sections must land on known timeline boundaries."
+                ),
+            },
+            "respect_sections_durations": {
+                "type": "boolean",
+                "description": "Enforce exact per-section duration_ms from the composition plan",
+            },
             "output_path": {"type": "string"},
             "force_instrumental": {
                 "type": "boolean",
@@ -155,15 +168,24 @@ class MusicGen(BaseTool):
             "Content-Type": "application/json",
         }
 
-        payload = {
-            "prompt": prompt,
-            "music_length_ms": int(duration * 1000),
-            # music-gen-usage mandate: always set force_instrumental=true for
-            # video background music (vocals collide with narration). The input
-            # schema defaults this to True, so callers get the mandate by
-            # default; they may opt out only by passing force_instrumental=False.
-            "force_instrumental": bool(inputs.get("force_instrumental", True)),
-        }
+        if inputs.get("composition_plan"):
+            # API accepts prompt OR composition_plan, not both. force_instrumental
+            # is prompt-mode only — instrumental plans carry empty section lines.
+            payload = {"composition_plan": inputs["composition_plan"]}
+            if inputs.get("respect_sections_durations") is not None:
+                payload["respect_sections_durations"] = bool(
+                    inputs["respect_sections_durations"]
+                )
+        else:
+            payload = {
+                "prompt": prompt,
+                "music_length_ms": int(duration * 1000),
+                # music-gen-usage mandate: always set force_instrumental=true for
+                # video background music (vocals collide with narration). The input
+                # schema defaults this to True, so callers get the mandate by
+                # default; they may opt out only by passing force_instrumental=False.
+                "force_instrumental": bool(inputs.get("force_instrumental", True)),
+            }
 
         response = requests.post(
             url, headers=headers, json=payload, timeout=180
