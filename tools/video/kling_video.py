@@ -74,16 +74,20 @@ class KlingVideo(BaseTool):
             },
             "duration": {
                 "type": "string",
-                "enum": ["5", "10"],
+                "enum": ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
                 "default": "5",
-                "description": "Duration in seconds",
+                "description": "Duration in seconds (v3 accepts 3-15; see docs-cache/fal-kling-v3.md)",
             },
             "aspect_ratio": {
                 "type": "string",
                 "enum": ["16:9", "9:16", "1:1"],
                 "default": "16:9",
             },
-            "image_url": {"type": "string", "description": "Reference image URL for image_to_video"},
+            "image_url": {"type": "string", "description": "Reference image URL for image_to_video (sent as start_image_url on v3)"},
+            "generate_audio": {
+                "type": "boolean",
+                "description": "fal v3 default is TRUE and bills the higher tier ($0.126/s vs $0.084/s); pass false for VO-led clips",
+            },
             "output_path": {"type": "string"},
         },
     }
@@ -105,13 +109,18 @@ class KlingVideo(BaseTool):
         return ToolStatus.UNAVAILABLE
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
+        # v3 standard published rates (fal.ai, cached 2026-07-08 in
+        # docs-cache/fal-kling-v3.md): $0.084/s audio-off, $0.126/s audio-on.
+        # fal defaults generate_audio to TRUE, so estimate the audio-on tier
+        # unless the caller explicitly disables it (never understate budgets).
         variant = inputs.get("model_variant", "v3/standard")
         duration = int(inputs.get("duration", "5"))
         if "master" in variant:
             return 0.30 * (duration / 5)
         if "pro" in variant:
             return 0.20 * (duration / 5)
-        return 0.10 * (duration / 5)  # standard
+        rate = 0.084 if inputs.get("generate_audio") is False else 0.126
+        return round(rate * duration, 4)
 
     def estimate_runtime(self, inputs: dict[str, Any]) -> float:
         return 60.0  # ~1 minute typical
@@ -139,7 +148,12 @@ class KlingVideo(BaseTool):
         if inputs.get("aspect_ratio"):
             payload["aspect_ratio"] = inputs["aspect_ratio"]
         if operation == "image_to_video" and inputs.get("image_url"):
-            payload["image_url"] = inputs["image_url"]
+            # v3 schema names this start_image_url (docs-cache/fal-kling-v3.md);
+            # older variants used image_url — send the right key per variant.
+            key = "start_image_url" if variant.startswith("v3") else "image_url"
+            payload[key] = inputs["image_url"]
+        if inputs.get("generate_audio") is not None:
+            payload["generate_audio"] = inputs["generate_audio"]
 
         headers = {
             "Authorization": f"Key {api_key}",
